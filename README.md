@@ -25,6 +25,122 @@ mvn clean package -DskipTests
 
 The resulting jars can be found in the `target` directory of the respective module.
 
+## Fusion Center Elasticsearch 8 SQL connector patches
+
+Fusion Center builds `flink-sql-connector-elasticsearch8`, the shaded SQL uber
+JAR used by Flink SQL Gateway. The runtime fixes are implemented in
+`flink-connector-elasticsearch8`; Maven then includes that patched library in the
+SQL JAR through the dependency and shade configuration of
+`flink-sql-connector-elasticsearch8/pom.xml`.
+
+### Patch responsibilities
+
+#### `elasticsearch8_async_writer_failure_handling.patch`
+
+This patch changes failure handling in `Elasticsearch8AsyncWriter`:
+
+* logs the first failed bulk item with index, document ID, HTTP status, error type,
+  and error reason;
+* retries transient failures such as HTTP 408/429, selected 5xx responses,
+  rejected execution, unavailable shards, timeouts, and connection failures;
+* treats deterministic failures such as mapping conflicts, document parsing
+  errors, authentication errors, and other non-retryable 4xx responses as fatal;
+* prevents deterministic records from entering an infinite retry/split loop.
+
+#### `elasticsearch8_nested_row_serialization.patch`
+
+This patch changes `RowDataToMapConverter` and adds
+`RowDataToMapConverterTest`:
+
+* recursively converts nested Flink SQL `ROW`, `ARRAY`, and `MAP` values into
+  JSON-native Java `Map` and `List` structures;
+* preserves named fields such as Debezium geometry `wkb` and `srid`;
+* prevents nested `Row` objects from being serialized as Flink bean metadata such
+  as `{"kind":"INSERT","arity":2}`;
+* tests a nullable geometry row and an array of geometry rows.
+
+### Apply and format the patches
+
+Run all commands from the repository root. Keep the patch files at the repository
+root or adjust their paths accordingly.
+
+```bash
+git apply --check elasticsearch8_async_writer_failure_handling.patch
+git apply --check elasticsearch8_nested_row_serialization.patch
+
+git apply elasticsearch8_async_writer_failure_handling.patch
+git apply elasticsearch8_nested_row_serialization.patch
+
+mvn spotless:apply
+git diff --check
+git status --short
+```
+
+`mvn spotless:apply` is required after applying the patches. It formats the Java
+sources according to the Flink project rules before Checkstyle and tests run.
+
+### Run the focused test
+
+```bash
+mvn \
+  -pl flink-connector-elasticsearch8 \
+  -am \
+  -DskipITs \
+  -Dtest=RowDataToMapConverterTest \
+  -Dsurefire.failIfNoSpecifiedTests=false \
+  test
+```
+
+The test must pass before building the SQL connector. For a broader module test,
+run:
+
+```bash
+mvn -pl flink-connector-elasticsearch8 -am -DskipITs test
+```
+
+### Build `flink-sql-connector-elasticsearch8`
+
+```bash
+mvn \
+  -pl flink-sql-connector-elasticsearch8 \
+  -am \
+  clean package \
+  -DskipTests
+```
+
+The final deployable artifact is:
+
+```text
+flink-sql-connector-elasticsearch8/target/
+  flink-sql-connector-elasticsearch8-4.1-SNAPSHOT.jar
+```
+
+The JAR from `flink-connector-elasticsearch8/target` is the library JAR, not the
+SQL Gateway artifact. Deploy the shaded JAR from the
+`flink-sql-connector-elasticsearch8/target` directory.
+
+### Verify the built JAR
+
+```bash
+JAR=flink-sql-connector-elasticsearch8/target/flink-sql-connector-elasticsearch8-4.1-SNAPSHOT.jar
+
+test -f "$JAR"
+jar tf "$JAR" | grep 'META-INF/services/org.apache.flink.table.factories.Factory'
+jar tf "$JAR" | grep -E 'RowDataToMapConverter|Elasticsearch8AsyncWriter'
+sha256sum "$JAR"
+```
+
+Publish the result under an immutable name, for example:
+
+```text
+flink-sql-connector-elasticsearch8-4.1-fc.1.jar
+```
+
+Do not place old and new Elasticsearch SQL connector JARs on the same Flink
+classpath. A running Flink job does not load the new JAR automatically: cancel the
+old job, deploy the new artifact to SQL Gateway and TaskManager-visible storage,
+update the Airflow connector JAR URI, and then trigger the pipeline again.
+
 ## Developing Flink
 
 The Flink committers use IntelliJ IDEA to develop the Flink codebase.

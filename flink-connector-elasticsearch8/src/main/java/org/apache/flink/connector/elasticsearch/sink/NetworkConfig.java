@@ -28,11 +28,9 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateSerializer;
-import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
-import com.fasterxml.jackson.datatype.jsr310.ser.LocalTimeSerializer;
 import org.apache.http.Header;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
@@ -47,10 +45,6 @@ import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
 
 import java.io.Serializable;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import static org.apache.flink.util.Preconditions.checkState;
@@ -67,11 +61,6 @@ public class NetworkConfig implements Serializable {
     @Nullable Integer socketTimeout;
     @Nullable private final SerializableSupplier<SSLContext> sslContextSupplier;
     @Nullable private final SerializableSupplier<HostnameVerifier> sslHostnameVerifier;
-    private static final DateTimeFormatter DATE_TIME_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final DateTimeFormatter DATE_FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     public NetworkConfig(
             List<HttpHost> hosts,
@@ -98,20 +87,22 @@ public class NetworkConfig implements Serializable {
     }
 
     public ElasticsearchAsyncClient createEsClient() {
-        // the JavaTimeModule is added to provide support for java 8 Time classes.
-        JavaTimeModule javaTimeModule = new JavaTimeModule();
-        javaTimeModule.addSerializer(
-                LocalDateTime.class, new LocalDateTimeSerializer(DATE_TIME_FORMATTER));
-        javaTimeModule.addSerializer(LocalDate.class, new LocalDateSerializer(DATE_FORMATTER));
-        javaTimeModule.addSerializer(LocalTime.class, new LocalTimeSerializer(TIME_FORMATTER));
-        ObjectMapper mapper = JsonMapper.builder().addModule(javaTimeModule).build();
         return new ElasticsearchAsyncClient(
-                new RestClientTransport(this.getRestClient(), new JacksonJsonpMapper(mapper)));
+                new RestClientTransport(
+                        this.getRestClient(), new JacksonJsonpMapper(createObjectMapper())));
     }
 
     public ElasticsearchClient createEsSyncClient() {
         return new ElasticsearchClient(
-                new RestClientTransport(this.getRestClient(), new JacksonJsonpMapper()));
+                new RestClientTransport(
+                        this.getRestClient(), new JacksonJsonpMapper(createObjectMapper())));
+    }
+
+    static ObjectMapper createObjectMapper() {
+        return JsonMapper.builder()
+                .addModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .build();
     }
 
     private RestClient getRestClient() {
