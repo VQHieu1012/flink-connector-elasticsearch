@@ -294,7 +294,13 @@ public class Elasticsearch8AsyncWriter<InputT> extends AsyncSinkWriter<InputT, O
     public void close() {
         if (!close) {
             close = true;
-            esClient.shutdown();
+            try {
+                if (esClient != null && esClient._transport() != null) {
+                    esClient._transport().close();
+                }
+            } catch (IOException e) {
+                LOG.warn("Failed to close Elasticsearch transport during sink close", e);
+            }
         }
     }
 }
