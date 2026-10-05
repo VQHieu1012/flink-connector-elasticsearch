@@ -36,6 +36,7 @@ import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
+import co.elastic.clients.elasticsearch.core.bulk.OperationType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,6 +77,10 @@ public class Elasticsearch8AsyncWriter<InputT> extends AsyncSinkWriter<InputT, O
     /** A counter to track the number of bulk requests that are sent to Elasticsearch. */
     private final Counter numRequestSubmittedCounter;
 
+    private final Counter numVersionConflictsIgnoredCounter;
+
+    private final VersionConflictPolicy versionConflictPolicy;
+
     private final OperationSerializer operationSerializer;
 
     public Elasticsearch8AsyncWriter(
@@ -89,6 +94,32 @@ public class Elasticsearch8AsyncWriter<InputT> extends AsyncSinkWriter<InputT, O
             long maxRecordSizeInBytes,
             NetworkConfig networkConfig,
             Collection<BufferedRequestState<Operation>> state) {
+        this(
+                elementConverter,
+                context,
+                maxBatchSize,
+                maxInFlightRequests,
+                maxBufferedRequests,
+                maxBatchSizeInBytes,
+                maxTimeInBufferMS,
+                maxRecordSizeInBytes,
+                networkConfig,
+                state,
+                VersionConflictPolicy.FAIL);
+    }
+
+    public Elasticsearch8AsyncWriter(
+            ElementConverter<InputT, Operation> elementConverter,
+            WriterInitContext context,
+            int maxBatchSize,
+            int maxInFlightRequests,
+            int maxBufferedRequests,
+            long maxBatchSizeInBytes,
+            long maxTimeInBufferMS,
+            long maxRecordSizeInBytes,
+            NetworkConfig networkConfig,
+            Collection<BufferedRequestState<Operation>> state,
+            VersionConflictPolicy versionConflictPolicy) {
         super(
                 elementConverter,
                 context,
@@ -110,6 +141,8 @@ public class Elasticsearch8AsyncWriter<InputT> extends AsyncSinkWriter<InputT, O
         this.numRecordsSendPartialFailureCounter =
                 metricGroup.counter("numRecordsSendPartialFailure");
         this.numRequestSubmittedCounter = metricGroup.counter("numRequestSubmitted");
+        this.numVersionConflictsIgnoredCounter = metricGroup.counter("numVersionConflictsIgnored");
+        this.versionConflictPolicy = checkNotNull(versionConflictPolicy);
         this.operationSerializer = new OperationSerializer();
     }
 
@@ -168,53 +201,85 @@ public class Elasticsearch8AsyncWriter<InputT> extends AsyncSinkWriter<InputT, O
             ResultHandler<Operation> resultHandler,
             BulkResponse response) {
         LOG.debug("The BulkRequest has failed partially. Response: {}", response);
-        ArrayList<Operation> retryableItems = new ArrayList<>();
-        BulkResponseItem firstFailedItem = null;
-        BulkResponseItem firstDeterministicFailure = null;
-        int failureCount = 0;
-        for (int i = 0; i < response.items().size(); i++) {
-            BulkResponseItem item = response.items().get(i);
-            if (item.error() == null) {
-                continue;
-            }
-            failureCount++;
-            if (firstFailedItem == null) {
-                firstFailedItem = item;
-            }
-            if (isTransientBulkFailure(item)) {
-                retryableItems.add(requestEntries.get(i));
-            } else if (firstDeterministicFailure == null) {
-                firstDeterministicFailure = item;
-            }
-        }
-
-        numRecordsOutErrorsCounter.inc(failureCount);
-        numRecordsSendPartialFailureCounter.inc(retryableItems.size());
+        BulkFailureClassification failures =
+                classifyFailedResponse(requestEntries, response, versionConflictPolicy);
+        numRecordsOutErrorsCounter.inc(failures.failureCount);
+        numRecordsSendPartialFailureCounter.inc(failures.retryableItems.size());
+        numVersionConflictsIgnoredCounter.inc(failures.ignoredCount);
         LOG.info(
                 "The BulkRequest with {} operation(s) has {} failure(s), of which {} are "
-                        + "retryable. It took {}ms",
+                        + "retryable and {} version conflict(s) ignored. It took {}ms",
                 requestEntries.size(),
-                failureCount,
-                retryableItems.size(),
+                failures.failureCount,
+                failures.retryableItems.size(),
+                failures.ignoredCount,
                 response.took());
 
-        if (firstFailedItem != null) {
-            logFailedBulkItem(firstFailedItem);
+        if (failures.firstIgnoredFailure != null) {
+            LOG.warn(
+                    "Ignored {} Elasticsearch update version conflict(s); first ignored item: {}",
+                    failures.ignoredCount,
+                    failureSummary(failures.firstIgnoredFailure));
         }
-        if (firstDeterministicFailure != null) {
+        if (failures.firstFailedItem != null) {
+            logFailedBulkItem(failures.firstFailedItem);
+        }
+        if (failures.firstDeterministicFailure != null) {
             resultHandler.complete();
             getFatalExceptionCons()
                     .accept(
                             new FlinkRuntimeException(
                                     "Non-retryable Elasticsearch bulk item failure: "
-                                            + failureSummary(firstDeterministicFailure)));
+                                            + failureSummary(failures.firstDeterministicFailure)));
             return;
         }
-        if (retryableItems.isEmpty()) {
+        if (failures.retryableItems.isEmpty()) {
             resultHandler.complete();
         } else {
-            resultHandler.retryForEntries(retryableItems);
+            resultHandler.retryForEntries(failures.retryableItems);
         }
+    }
+
+    static BulkFailureClassification classifyFailedResponse(
+            List<Operation> requestEntries,
+            BulkResponse response,
+            VersionConflictPolicy versionConflictPolicy) {
+        BulkFailureClassification failures = new BulkFailureClassification();
+        for (int i = 0; i < response.items().size(); i++) {
+            BulkResponseItem item = response.items().get(i);
+            if (item.error() == null) {
+                continue;
+            }
+            failures.failureCount++;
+            if (versionConflictPolicy == VersionConflictPolicy.IGNORE
+                    && item.operationType() == OperationType.Update
+                    && item.status() == 409
+                    && "version_conflict_engine_exception".equals(item.error().type())) {
+                failures.ignoredCount++;
+                if (failures.firstIgnoredFailure == null) {
+                    failures.firstIgnoredFailure = item;
+                }
+                continue;
+            }
+            if (failures.firstFailedItem == null) {
+                failures.firstFailedItem = item;
+            }
+            if (isTransientBulkFailure(item)) {
+                failures.retryableItems.add(requestEntries.get(i));
+            } else if (failures.firstDeterministicFailure == null) {
+                failures.firstDeterministicFailure = item;
+            }
+        }
+        return failures;
+    }
+
+    static final class BulkFailureClassification {
+        final ArrayList<Operation> retryableItems = new ArrayList<>();
+        BulkResponseItem firstFailedItem;
+        BulkResponseItem firstDeterministicFailure;
+        BulkResponseItem firstIgnoredFailure;
+        int failureCount;
+        int ignoredCount;
     }
 
     private static void logFailedBulkItem(BulkResponseItem item) {

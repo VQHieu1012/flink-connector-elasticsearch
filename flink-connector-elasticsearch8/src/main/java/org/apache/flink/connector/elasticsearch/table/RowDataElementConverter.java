@@ -47,14 +47,17 @@ public class RowDataElementConverter implements ElementConverter<RowData, BulkOp
     private final IndexGenerator indexGenerator;
     private final Function<RowData, String> keyExtractor;
     private final RowDataToMapConverter rowDataToMapConverter;
+    private final int retryOnConflict;
 
     public RowDataElementConverter(
             DataType physicalDataType,
             IndexGenerator indexGenerator,
-            Function<RowData, String> keyExtractor) {
+            Function<RowData, String> keyExtractor,
+            int retryOnConflict) {
         this.rowDataToMapConverter = new RowDataToMapConverter(physicalDataType);
         this.indexGenerator = indexGenerator;
         this.keyExtractor = keyExtractor;
+        this.retryOnConflict = retryOnConflict;
     }
 
     @Override
@@ -82,6 +85,7 @@ public class RowDataElementConverter implements ElementConverter<RowData, BulkOp
                         new UpdateOperation.Builder<>()
                                 .index(indexGenerator.generate(rowData))
                                 .id(keyExtractor.apply(rowData))
+                                .retryOnConflict(retryOnConflict)
                                 .action(a -> a.doc(dataMap).docAsUpsert(true))
                                 .build();
                 break;

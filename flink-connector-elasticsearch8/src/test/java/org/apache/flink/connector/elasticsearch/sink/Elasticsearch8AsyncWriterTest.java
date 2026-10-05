@@ -18,12 +18,16 @@
 
 package org.apache.flink.connector.elasticsearch.sink;
 
+import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.bulk.OperationType;
+import co.elastic.clients.elasticsearch.core.bulk.UpdateOperation;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.net.ConnectException;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,13 +70,119 @@ class Elasticsearch8AsyncWriterTest {
                 .isFalse();
     }
 
-    private static BulkResponseItem failedItem(int status, String errorType) {
+    @Test
+    void ignorePolicyDropsOnlyVersionConflictsAndRetriesTransientFailures() {
+        Operation conflicted = update("conflicted");
+        Operation retryable = update("retryable");
+        BulkResponse response =
+                new BulkResponse.Builder()
+                        .errors(true)
+                        .took(1)
+                        .items(
+                                failedItem(
+                                        OperationType.Update,
+                                        "conflicted",
+                                        409,
+                                        "version_conflict_engine_exception"),
+                                failedItem(
+                                        OperationType.Update,
+                                        "retryable",
+                                        429,
+                                        "es_rejected_execution_exception"))
+                        .build();
+        Elasticsearch8AsyncWriter.BulkFailureClassification result =
+                Elasticsearch8AsyncWriter.classifyFailedResponse(
+                        List.of(conflicted, retryable), response, VersionConflictPolicy.IGNORE);
+
+        assertThat(result.retryableItems).containsExactly(retryable);
+        assertThat(result.ignoredCount).isEqualTo(1);
+        assertThat(result.firstDeterministicFailure).isNull();
+    }
+
+    @Test
+    void failPolicyKeepsVersionConflictFatal() {
+        BulkResponseItem conflict =
+                failedItem(
+                        OperationType.Update,
+                        "conflicted",
+                        409,
+                        "version_conflict_engine_exception");
+        BulkResponse response =
+                new BulkResponse.Builder().errors(true).took(1).items(conflict).build();
+
+        Elasticsearch8AsyncWriter.BulkFailureClassification result =
+                Elasticsearch8AsyncWriter.classifyFailedResponse(
+                        List.of(update("conflicted")), response, VersionConflictPolicy.FAIL);
+
+        assertThat(result.firstDeterministicFailure).isEqualTo(conflict);
+        assertThat(result.ignoredCount).isZero();
+    }
+
+    @Test
+    void ignorePolicyCompletesWhenEveryFailureIsAnUpdateVersionConflict() {
+        BulkResponseItem conflict =
+                failedItem(
+                        OperationType.Update,
+                        "conflicted",
+                        409,
+                        "version_conflict_engine_exception");
+        BulkResponse response =
+                new BulkResponse.Builder().errors(true).took(1).items(conflict).build();
+
+        Elasticsearch8AsyncWriter.BulkFailureClassification result =
+                Elasticsearch8AsyncWriter.classifyFailedResponse(
+                        List.of(update("conflicted")), response, VersionConflictPolicy.IGNORE);
+
+        assertThat(result.retryableItems).isEmpty();
+        assertThat(result.firstDeterministicFailure).isNull();
+        assertThat(result.ignoredCount).isEqualTo(1);
+        assertThat(result.failureCount).isEqualTo(1);
+    }
+
+    @Test
+    void ignorePolicyDoesNotDropOtherConflicts() {
+        BulkResponseItem indexConflict =
+                failedItem(OperationType.Index, "index", 409, "version_conflict_engine_exception");
+        BulkResponseItem otherUpdateConflict =
+                failedItem(OperationType.Update, "update", 409, "other_conflict");
+        BulkResponse response =
+                new BulkResponse.Builder()
+                        .errors(true)
+                        .took(1)
+                        .items(indexConflict, otherUpdateConflict)
+                        .build();
+
+        Elasticsearch8AsyncWriter.BulkFailureClassification result =
+                Elasticsearch8AsyncWriter.classifyFailedResponse(
+                        List.of(update("index"), update("update")),
+                        response,
+                        VersionConflictPolicy.IGNORE);
+
+        assertThat(result.firstDeterministicFailure).isEqualTo(indexConflict);
+        assertThat(result.ignoredCount).isZero();
+    }
+
+    private static Operation update(String id) {
+        return new Operation(
+                new UpdateOperation.Builder<Map<String, String>, Map<String, String>>()
+                        .index("test-index")
+                        .id(id)
+                        .action(action -> action.doc(Map.of("value", id)))
+                        .build());
+    }
+
+    private static BulkResponseItem failedItem(
+            OperationType operationType, String id, int status, String errorType) {
         return new BulkResponseItem.Builder()
-                .operationType(OperationType.Index)
+                .operationType(operationType)
                 .index("test-index")
-                .id("test-id")
+                .id(id)
                 .status(status)
                 .error(error -> error.type(errorType).reason("test failure"))
                 .build();
+    }
+
+    private static BulkResponseItem failedItem(int status, String errorType) {
+        return failedItem(OperationType.Index, "test-id", status, errorType);
     }
 }

@@ -131,9 +131,13 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
         builder.setMaxBatchSizeInBytes(config.getBulkFlushMaxByteSize().getBytes());
         builder.setMaxRecordSizeInBytes(config.getMaxRecordSize().getBytes());
         builder.setMaxTimeInBufferMS(config.getBulkFlushInterval());
+        builder.setVersionConflictPolicy(config.getVersionConflictPolicy());
         builder.setElementConverter(
                 new RowDataElementConverter(
-                        physicalRowDataType, createIndexGenerator(), createKeyExtractor()));
+                        physicalRowDataType,
+                        createIndexGenerator(),
+                        createKeyExtractor(),
+                        config.getRetryOnConflict()));
 
         config.getUsername()
                 .filter(username -> !StringUtils.isNullOrWhitespaceOnly(username))

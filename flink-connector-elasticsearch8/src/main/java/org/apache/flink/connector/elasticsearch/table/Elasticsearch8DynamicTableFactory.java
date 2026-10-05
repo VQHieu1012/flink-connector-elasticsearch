@@ -68,9 +68,11 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RETRIES;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.NUM_CANDIDATES;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.PASSWORD_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.RETRY_ON_CONFLICT_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.SOCKET_TIMEOUT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.SSL_CERTIFICATE_FINGERPRINT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.USERNAME_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.VERSION_CONFLICT_POLICY_OPTION;
 import static org.apache.flink.connector.elasticsearch.utils.StringUtils.capitalizeFirst;
 import static org.apache.flink.table.connector.source.lookup.LookupOptions.CACHE_TYPE;
 import static org.apache.flink.table.connector.source.lookup.LookupOptions.PARTIAL_CACHE_CACHE_MISSING_KEY;
@@ -174,6 +176,13 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
                                 BULK_FLUSH_MAX_SIZE_OPTION.key(),
                                 maxRecordSize,
                                 maxSize));
+        int retryOnConflict = config.getRetryOnConflict();
+        validate(
+                retryOnConflict >= 0,
+                () ->
+                        String.format(
+                                "'%s' must be non-negative. Got: %s",
+                                RETRY_ON_CONFLICT_OPTION.key(), retryOnConflict));
         if (config.getUsername().isPresent()
                 && !StringUtils.isNullOrWhitespaceOnly(config.getUsername().get())) {
             validate(
@@ -242,6 +251,8 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
                         BULK_FLUSH_MAX_IN_FLIGHT_ACTIONS_OPTION,
                         BULK_FLUSH_MAX_SIZE_OPTION,
                         MAX_RECORD_SIZE_OPTION,
+                        RETRY_ON_CONFLICT_OPTION,
+                        VERSION_CONFLICT_POLICY_OPTION,
                         BULK_FLUSH_INTERVAL_OPTION,
                         CONNECTION_PATH_PREFIX_OPTION,
                         CONNECTION_REQUEST_TIMEOUT,
@@ -276,6 +287,8 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
                         BULK_FLUSH_MAX_IN_FLIGHT_ACTIONS_OPTION,
                         BULK_FLUSH_MAX_SIZE_OPTION,
                         MAX_RECORD_SIZE_OPTION,
+                        RETRY_ON_CONFLICT_OPTION,
+                        VERSION_CONFLICT_POLICY_OPTION,
                         BULK_FLUSH_INTERVAL_OPTION,
                         CONNECTION_PATH_PREFIX_OPTION,
                         CONNECTION_REQUEST_TIMEOUT,

@@ -94,6 +94,14 @@ public class Elasticsearch8AsyncSinkBuilder<InputT>
 
     private SerializableSupplier<HostnameVerifier> sslHostnameVerifier;
 
+    private VersionConflictPolicy versionConflictPolicy = VersionConflictPolicy.FAIL;
+
+    public Elasticsearch8AsyncSinkBuilder<InputT> setVersionConflictPolicy(
+            VersionConflictPolicy versionConflictPolicy) {
+        this.versionConflictPolicy = checkNotNull(versionConflictPolicy);
+        return this;
+    }
+
     /**
      * setHosts set the hosts where the Elasticsearch cluster is reachable.
      *
@@ -260,7 +268,8 @@ public class Elasticsearch8AsyncSinkBuilder<InputT>
                 Optional.ofNullable(getMaxBatchSizeInBytes()).orElse(DEFAULT_MAX_BATCH_SIZE_IN_B),
                 Optional.ofNullable(getMaxTimeInBufferMS()).orElse(DEFAULT_MAX_TIME_IN_BUFFER_MS),
                 Optional.ofNullable(getMaxRecordSizeInBytes()).orElse(DEFAULT_MAX_RECORD_SIZE_IN_B),
-                buildNetworkConfig());
+                buildNetworkConfig(),
+                versionConflictPolicy);
     }
 
     private OperationConverter<InputT> buildOperationConverter(

@@ -79,6 +79,8 @@ are required; `—` means there is no connector-defined default.
 | `sink.bulk-flush.max-size` | Sink | `2mb` | Maximum size of buffered actions per bulk request. Must be at least 1 MiB and specified in whole-MiB increments. |
 | `sink.bulk-flush.interval` | Sink | `1s` | Maximum interval before buffered actions are flushed. |
 | `sink.max-record-size` | Sink | `1mb` | Maximum serialized size of one record. Must be positive and no greater than `sink.bulk-flush.max-size`. |
+| `sink.retry-on-conflict` | Sink | `0` | Number of retries performed by Elasticsearch for an update that hits a version conflict. Applies to update operations only; must be non-negative. |
+| `sink.version-conflict-policy` | Sink | `fail` | What the writer does if an update still returns a 409 `version_conflict_engine_exception`: `fail` fails the Flink task; `ignore` logs and counts the conflict, then drops that update. |
 | `max-retries` (`lookup.max-retries` alias) | Vector search | `3` | Maximum retry attempts for a failed vector search request. |
 | `vector-search.num-candidates` | Vector search | `100` | Number of candidate neighbors considered per shard during vector search. |
 | `lookup.cache` | Lookup cache | `NONE` | Flink lookup-cache mode. Lookup caching is not active for this connector, whose source exposes vector search rather than lookup joins. |

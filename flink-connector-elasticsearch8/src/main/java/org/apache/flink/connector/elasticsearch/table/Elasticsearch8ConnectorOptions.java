@@ -26,6 +26,7 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.elasticsearch.sink.VersionConflictPolicy;
 
 import java.time.Duration;
 import java.util.List;
@@ -101,6 +102,20 @@ public class Elasticsearch8ConnectorOptions {
                     .memoryType()
                     .defaultValue(MemorySize.parse("1mb"))
                     .withDescription("Maximum serialized size of a single record");
+
+    public static final ConfigOption<Integer> RETRY_ON_CONFLICT_OPTION =
+            ConfigOptions.key("sink.retry-on-conflict")
+                    .intType()
+                    .defaultValue(0)
+                    .withDescription(
+                            "Number of retries Elasticsearch performs for a version conflict on an update operation.");
+
+    public static final ConfigOption<VersionConflictPolicy> VERSION_CONFLICT_POLICY_OPTION =
+            ConfigOptions.key("sink.version-conflict-policy")
+                    .enumType(VersionConflictPolicy.class)
+                    .defaultValue(VersionConflictPolicy.FAIL)
+                    .withDescription(
+                            "Whether the sink fails or ignores an update version conflict after Elasticsearch retries are exhausted.");
 
     public static final ConfigOption<Duration> BULK_FLUSH_INTERVAL_OPTION =
             ConfigOptions.key("sink.bulk-flush.interval")

@@ -25,6 +25,7 @@ import org.apache.flink.annotation.Internal;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.base.DeliveryGuarantee;
+import org.apache.flink.connector.elasticsearch.sink.VersionConflictPolicy;
 import org.apache.flink.table.api.ValidationException;
 
 import org.apache.http.HttpHost;
@@ -50,9 +51,11 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RETRIES;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.NUM_CANDIDATES;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.PASSWORD_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.RETRY_ON_CONFLICT_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.SOCKET_TIMEOUT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.SSL_CERTIFICATE_FINGERPRINT;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.USERNAME_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.VERSION_CONFLICT_POLICY_OPTION;
 import static org.apache.flink.table.factories.FactoryUtil.SINK_PARALLELISM;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -83,6 +86,14 @@ public class Elasticsearch8Configuration {
 
     public MemorySize getMaxRecordSize() {
         return config.get(MAX_RECORD_SIZE_OPTION);
+    }
+
+    public int getRetryOnConflict() {
+        return config.get(RETRY_ON_CONFLICT_OPTION);
+    }
+
+    public VersionConflictPolicy getVersionConflictPolicy() {
+        return config.get(VERSION_CONFLICT_POLICY_OPTION);
     }
 
     public long getBulkFlushInterval() {

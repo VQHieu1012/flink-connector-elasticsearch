@@ -47,6 +47,8 @@ public class Elasticsearch8AsyncSink<InputT> extends AsyncSinkBase<InputT, Opera
 
     @VisibleForTesting protected final NetworkConfig networkConfig;
 
+    private final VersionConflictPolicy versionConflictPolicy;
+
     protected Elasticsearch8AsyncSink(
             ElementConverter<InputT, Operation> converter,
             int maxBatchSize,
@@ -56,6 +58,28 @@ public class Elasticsearch8AsyncSink<InputT> extends AsyncSinkBase<InputT, Opera
             long maxTimeInBufferMS,
             long maxRecordSizeInByte,
             NetworkConfig networkConfig) {
+        this(
+                converter,
+                maxBatchSize,
+                maxInFlightRequests,
+                maxBufferedRequests,
+                maxBatchSizeInBytes,
+                maxTimeInBufferMS,
+                maxRecordSizeInByte,
+                networkConfig,
+                VersionConflictPolicy.FAIL);
+    }
+
+    protected Elasticsearch8AsyncSink(
+            ElementConverter<InputT, Operation> converter,
+            int maxBatchSize,
+            int maxInFlightRequests,
+            int maxBufferedRequests,
+            long maxBatchSizeInBytes,
+            long maxTimeInBufferMS,
+            long maxRecordSizeInByte,
+            NetworkConfig networkConfig,
+            VersionConflictPolicy versionConflictPolicy) {
         super(
                 converter,
                 maxBatchSize,
@@ -66,6 +90,7 @@ public class Elasticsearch8AsyncSink<InputT> extends AsyncSinkBase<InputT, Opera
                 maxRecordSizeInByte);
 
         this.networkConfig = networkConfig;
+        this.versionConflictPolicy = versionConflictPolicy;
     }
 
     @Override
@@ -81,7 +106,8 @@ public class Elasticsearch8AsyncSink<InputT> extends AsyncSinkBase<InputT, Opera
                 getMaxTimeInBufferMS(),
                 getMaxRecordSizeInBytes(),
                 networkConfig,
-                Collections.emptyList());
+                Collections.emptyList(),
+                versionConflictPolicy);
     }
 
     @Override
@@ -97,7 +123,8 @@ public class Elasticsearch8AsyncSink<InputT> extends AsyncSinkBase<InputT, Opera
                 getMaxTimeInBufferMS(),
                 getMaxRecordSizeInBytes(),
                 networkConfig,
-                recoveredState);
+                recoveredState,
+                versionConflictPolicy);
     }
 
     @Override
