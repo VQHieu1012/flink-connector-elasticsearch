@@ -1,6 +1,9 @@
 # Apache Flink Elasticsearch Connector
 
-This repository contains the official Apache Flink Elasticsearch connector.
+This repository is a fork of the [Apache Flink Elasticsearch Connector](https://github.com/apache/flink-connector-elasticsearch).
+It retains the upstream project structure and includes additional changes to
+the Elasticsearch 8 SQL connector. The upstream project remains the source for
+general connector documentation and development.
 
 ## Apache Flink
 
@@ -25,18 +28,23 @@ mvn clean package -DskipTests
 
 The resulting jars can be found in the `target` directory of the respective module.
 
-## Fusion Center Elasticsearch 8 SQL connector customizations
+## Connector changes
 
-The `flink-connector-elasticsearch8` module includes the following runtime
-customizations used by Fusion Center:
+The following changes are implemented in `flink-connector-elasticsearch8`:
 
-* Async bulk failures include details about the failed item, retry transient
-  failures, and fail fast on deterministic document or configuration errors.
-* Nested SQL `ROW`, `ARRAY`, and `MAP` values are converted to JSON-native maps
-  and lists, preserving named fields such as Debezium geometry `wkb` and `srid`.
-* The SQL sink option `sink.max-record-size` controls the maximum serialized
-  Elasticsearch document size. Its default is 1 MiB. It must not exceed
-  `sink.bulk-flush.max-size`, so increase both options for larger documents:
+* **Async bulk failure handling** — `Elasticsearch8AsyncWriter` logs the failed
+  document's index, ID, HTTP status, error type, and reason. It retries transient
+  failures (including HTTP 408, 429, selected 5xx responses, and known timeout,
+  transport, rejected-execution, or unavailable-shard errors) and fails the sink
+  for non-retryable item failures instead of retrying them indefinitely.
+* **Nested row serialization** — `RowDataToMapConverter` recursively converts
+  SQL `ROW`, `ARRAY`, and `MAP` values into JSON-friendly maps and lists. This
+  preserves named nested fields (for example, Debezium geometry `wkb` and
+  `srid`) rather than serializing nested rows as Flink `Row` metadata.
+* **Configurable record size** — the SQL sink option `sink.max-record-size`
+  sets the maximum serialized size of one record; its default is 1 MiB. The
+  value must be positive and no greater than `sink.bulk-flush.max-size` (which
+  defaults to 2 MiB). Set both options when a record is larger than the default:
 
 ```sql
 WITH (
@@ -45,8 +53,53 @@ WITH (
 )
 ```
 
-Focused tests are available in `flink-connector-elasticsearch8`, including
-`RowDataToMapConverterTest` and `Elasticsearch8DynamicTableFactoryTest`.
+### SQL table options
+
+Set these options in the connector table's `WITH` clause. `hosts` and `index`
+are required; `—` means there is no connector-defined default.
+
+| Option | Applies to | Default | Description |
+| --- | --- | --- | --- |
+| `hosts` | Source and sink | Required | One or more Elasticsearch HTTP(S) endpoints, including ports. |
+| `index` | Source and sink | Required | Elasticsearch index to read from or write to. |
+| `username` | Source and sink | — | Username for Elasticsearch authentication. Set together with `password`. |
+| `password` | Source and sink | — | Password for Elasticsearch authentication. Set together with `username`. |
+| `ssl.certificate-fingerprint` | Source and sink | — | SHA-256 fingerprint of the CA certificate used to verify HTTPS. |
+| `connection.path-prefix` | Source and sink | — | Prefix added to Elasticsearch REST request paths. |
+| `connection.request-timeout` | Source and sink | — | Maximum time to obtain a connection from the connection manager. |
+| `connection.timeout` | Source and sink | — | Maximum time to establish a connection. |
+| `socket.timeout` | Source and sink | — | Maximum inactivity between receiving consecutive response packets. |
+| `format` | Source and sink | `json` | Data format used to decode input or encode output. The format must produce valid JSON documents. |
+| `sink.parallelism` | Sink | — | Parallelism for the sink operator; by default Flink determines it from the execution plan. |
+| `sink.delivery-guarantee` | Sink | `AT_LEAST_ONCE` | Delivery guarantee requested for sink writes. |
+| `document-id.key-delimiter` | Sink | `_` | Delimiter used when composing a document ID from multiple key fields. |
+| `sink.bulk-flush.max-actions` | Sink | `1000` | Maximum number of actions in a bulk request. |
+| `sink.bulk-flush.max-buffered-actions` | Sink | `10000` | Maximum number of actions buffered by the sink. |
+| `sink.bulk-flush.max-in-flight-actions` | Sink | `50` | Maximum number of uncompleted actions before writes are back-pressured. |
+| `sink.bulk-flush.max-size` | Sink | `2mb` | Maximum size of buffered actions per bulk request. Must be at least 1 MiB and specified in whole-MiB increments. |
+| `sink.bulk-flush.interval` | Sink | `1s` | Maximum interval before buffered actions are flushed. |
+| `sink.max-record-size` | Sink | `1mb` | Maximum serialized size of one record. Must be positive and no greater than `sink.bulk-flush.max-size`. |
+| `max-retries` (`lookup.max-retries` alias) | Vector search | `3` | Maximum retry attempts for a failed vector search request. |
+| `vector-search.num-candidates` | Vector search | `100` | Number of candidate neighbors considered per shard during vector search. |
+| `lookup.cache` | Lookup cache | `NONE` | Flink lookup-cache mode. Lookup caching is not active for this connector, whose source exposes vector search rather than lookup joins. |
+| `lookup.partial-cache.max-rows` | Lookup cache | None | Maximum rows retained by Flink's partial lookup cache; not active for this connector. |
+| `lookup.partial-cache.expire-after-access` | Lookup cache | None | Evict a cached row after this duration without access; not active for this connector. |
+| `lookup.partial-cache.expire-after-write` | Lookup cache | None | Evict a cached row after this duration since it was written; not active for this connector. |
+| `lookup.partial-cache.cache-missing-key` | Lookup cache | `true` | Whether Flink caches empty lookup results; not active for this connector. |
+
+The `lookup.*` entries are Flink's standard lookup-cache options recognized by
+the factory, but they do not enable lookup joins or caching in this connector.
+See the [Flink 2.2 lookup-cache documentation](https://nightlies.apache.org/flink/flink-docs-release-2.2/docs/connectors/table/jdbc/#lookup-cache)
+for the generic cache behavior.
+
+Tests for these changes are in `flink-connector-elasticsearch8`, including
+`Elasticsearch8AsyncWriterTest`, `RowDataToMapConverterTest`, and
+`Elasticsearch8DynamicTableFactoryTest`. Run the module tests with:
+
+```bash
+mvn -pl flink-connector-elasticsearch8 -am -DskipITs test
+```
+
 To build the deployable shaded SQL connector JAR, run:
 
 ```bash
