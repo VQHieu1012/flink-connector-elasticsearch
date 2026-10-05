@@ -64,6 +64,7 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.HOSTS_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.INDEX_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.KEY_DELIMITER_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RECORD_SIZE_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RETRIES;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.NUM_CANDIDATES;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.PASSWORD_OPTION;
@@ -157,6 +158,22 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
                                 "'%s' must be in MB granularity. Got: %s",
                                 BULK_FLUSH_MAX_SIZE_OPTION.key(),
                                 config.getBulkFlushMaxByteSize().toHumanReadableString()));
+        long maxRecordSize = config.getMaxRecordSize().getBytes();
+        validate(
+                maxRecordSize > 0,
+                () ->
+                        String.format(
+                                "'%s' must be greater than 0. Got: %s bytes",
+                                MAX_RECORD_SIZE_OPTION.key(), maxRecordSize));
+        validate(
+                maxRecordSize <= maxSize,
+                () ->
+                        String.format(
+                                "'%s' must not exceed '%s'. Got: %s bytes and %s bytes",
+                                MAX_RECORD_SIZE_OPTION.key(),
+                                BULK_FLUSH_MAX_SIZE_OPTION.key(),
+                                maxRecordSize,
+                                maxSize));
         if (config.getUsername().isPresent()
                 && !StringUtils.isNullOrWhitespaceOnly(config.getUsername().get())) {
             validate(
@@ -224,6 +241,7 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
                         BULK_FLUSH_MAX_BUFFERED_ACTIONS_OPTION,
                         BULK_FLUSH_MAX_IN_FLIGHT_ACTIONS_OPTION,
                         BULK_FLUSH_MAX_SIZE_OPTION,
+                        MAX_RECORD_SIZE_OPTION,
                         BULK_FLUSH_INTERVAL_OPTION,
                         CONNECTION_PATH_PREFIX_OPTION,
                         CONNECTION_REQUEST_TIMEOUT,
@@ -257,6 +275,7 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
                         BULK_FLUSH_MAX_BUFFERED_ACTIONS_OPTION,
                         BULK_FLUSH_MAX_IN_FLIGHT_ACTIONS_OPTION,
                         BULK_FLUSH_MAX_SIZE_OPTION,
+                        MAX_RECORD_SIZE_OPTION,
                         BULK_FLUSH_INTERVAL_OPTION,
                         CONNECTION_PATH_PREFIX_OPTION,
                         CONNECTION_REQUEST_TIMEOUT,

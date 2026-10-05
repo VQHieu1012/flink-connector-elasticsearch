@@ -1,0 +1,221 @@
+diff --git a/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/ElasticSearch8AsyncDynamicSink.java b/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/ElasticSearch8AsyncDynamicSink.java
+index bfbc37d..6476de5 100644
+--- a/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/ElasticSearch8AsyncDynamicSink.java
++++ b/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/ElasticSearch8AsyncDynamicSink.java
+@@ -129,6 +129,7 @@ public class ElasticSearch8AsyncDynamicSink extends AsyncDynamicTableSink<Operat
+         builder.setMaxBatchSize(config.getBulkFlushMaxActions());
+         builder.setMaxBufferedRequests(config.getBulkFlushMaxBufferedActions());
+         builder.setMaxBatchSizeInBytes(config.getBulkFlushMaxByteSize().getBytes());
++        builder.setMaxRecordSizeInBytes(config.getMaxRecordSize().getBytes());
+         builder.setMaxTimeInBufferMS(config.getBulkFlushInterval());
+         builder.setElementConverter(
+                 new RowDataElementConverter(
+diff --git a/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8Configuration.java b/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8Configuration.java
+index 351fa55..f7bf630 100644
+--- a/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8Configuration.java
++++ b/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8Configuration.java
+@@ -46,6 +46,7 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.HOSTS_OPTION;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.INDEX_OPTION;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.KEY_DELIMITER_OPTION;
++import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RECORD_SIZE_OPTION;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RETRIES;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.NUM_CANDIDATES;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.PASSWORD_OPTION;
+@@ -80,6 +81,10 @@ public class Elasticsearch8Configuration {
+         return config.get(BULK_FLUSH_MAX_SIZE_OPTION);
+     }
+ 
++    public MemorySize getMaxRecordSize() {
++        return config.get(MAX_RECORD_SIZE_OPTION);
++    }
++
+     public long getBulkFlushInterval() {
+         return config.get(BULK_FLUSH_INTERVAL_OPTION).toMillis();
+     }
+diff --git a/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8ConnectorOptions.java b/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8ConnectorOptions.java
+index 74a450b..85fc3ef 100644
+--- a/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8ConnectorOptions.java
++++ b/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8ConnectorOptions.java
+@@ -96,6 +96,12 @@ public class Elasticsearch8ConnectorOptions {
+                     .defaultValue(MemorySize.parse("2mb"))
+                     .withDescription("Maximum size of buffered actions per bulk request");
+ 
++    public static final ConfigOption<MemorySize> MAX_RECORD_SIZE_OPTION =
++            ConfigOptions.key("sink.max-record-size")
++                    .memoryType()
++                    .defaultValue(MemorySize.parse("1mb"))
++                    .withDescription("Maximum serialized size of a single record");
++
+     public static final ConfigOption<Duration> BULK_FLUSH_INTERVAL_OPTION =
+             ConfigOptions.key("sink.bulk-flush.interval")
+                     .durationType()
+diff --git a/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8DynamicTableFactory.java b/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8DynamicTableFactory.java
+index 66a78a1..0ff8ed4 100644
+--- a/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8DynamicTableFactory.java
++++ b/flink-connector-elasticsearch8/src/main/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8DynamicTableFactory.java
+@@ -64,6 +64,7 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.HOSTS_OPTION;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.INDEX_OPTION;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.KEY_DELIMITER_OPTION;
++import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RECORD_SIZE_OPTION;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RETRIES;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.NUM_CANDIDATES;
+ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.PASSWORD_OPTION;
+@@ -157,6 +158,22 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
+                                 "'%s' must be in MB granularity. Got: %s",
+                                 BULK_FLUSH_MAX_SIZE_OPTION.key(),
+                                 config.getBulkFlushMaxByteSize().toHumanReadableString()));
++        long maxRecordSize = config.getMaxRecordSize().getBytes();
++        validate(
++                maxRecordSize > 0,
++                () ->
++                        String.format(
++                                "'%s' must be greater than 0. Got: %s bytes",
++                                MAX_RECORD_SIZE_OPTION.key(), maxRecordSize));
++        validate(
++                maxRecordSize <= maxSize,
++                () ->
++                        String.format(
++                                "'%s' must not exceed '%s'. Got: %s bytes and %s bytes",
++                                MAX_RECORD_SIZE_OPTION.key(),
++                                BULK_FLUSH_MAX_SIZE_OPTION.key(),
++                                maxRecordSize,
++                                maxSize));
+         if (config.getUsername().isPresent()
+                 && !StringUtils.isNullOrWhitespaceOnly(config.getUsername().get())) {
+             validate(
+@@ -224,6 +241,7 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
+                         BULK_FLUSH_MAX_BUFFERED_ACTIONS_OPTION,
+                         BULK_FLUSH_MAX_IN_FLIGHT_ACTIONS_OPTION,
+                         BULK_FLUSH_MAX_SIZE_OPTION,
++                        MAX_RECORD_SIZE_OPTION,
+                         BULK_FLUSH_INTERVAL_OPTION,
+                         CONNECTION_PATH_PREFIX_OPTION,
+                         CONNECTION_REQUEST_TIMEOUT,
+@@ -257,6 +275,7 @@ public class Elasticsearch8DynamicTableFactory extends AsyncDynamicTableSinkFact
+                         BULK_FLUSH_MAX_BUFFERED_ACTIONS_OPTION,
+                         BULK_FLUSH_MAX_IN_FLIGHT_ACTIONS_OPTION,
+                         BULK_FLUSH_MAX_SIZE_OPTION,
++                        MAX_RECORD_SIZE_OPTION,
+                         BULK_FLUSH_INTERVAL_OPTION,
+                         CONNECTION_PATH_PREFIX_OPTION,
+                         CONNECTION_REQUEST_TIMEOUT,
+diff --git a/flink-connector-elasticsearch8/src/test/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8DynamicTableFactoryTest.java b/flink-connector-elasticsearch8/src/test/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8DynamicTableFactoryTest.java
+new file mode 100644
+index 0000000..0c7221b
+--- /dev/null
++++ b/flink-connector-elasticsearch8/src/test/java/org/apache/flink/connector/elasticsearch/table/Elasticsearch8DynamicTableFactoryTest.java
+@@ -0,0 +1,112 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.apache.flink.connector.elasticsearch.table;
++
++import org.apache.flink.api.common.typeinfo.TypeInformation;
++import org.apache.flink.api.connector.sink2.Sink;
++import org.apache.flink.connector.base.sink.AsyncSinkBase;
++import org.apache.flink.table.connector.sink.DynamicTableSink;
++import org.apache.flink.table.connector.sink.SinkV2Provider;
++import org.apache.flink.table.data.RowData;
++import org.apache.flink.table.types.DataType;
++import org.apache.flink.table.types.logical.LogicalType;
++
++import org.junit.jupiter.api.Test;
++
++import java.util.Optional;
++
++import static org.apache.flink.connector.elasticsearch.table.TestContext.context;
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.assertThatThrownBy;
++
++/** Tests for {@link Elasticsearch8DynamicTableFactory}. */
++class Elasticsearch8DynamicTableFactoryTest {
++
++    @Test
++    void configuredMaxRecordSizeIsPropagatedToRuntimeSink() {
++        Elasticsearch8DynamicTableFactory factory = new Elasticsearch8DynamicTableFactory();
++
++        DynamicTableSink dynamicSink =
++                factory.createDynamicTableSink(
++                        context()
++                                .withOption("connector", "elasticsearch-8")
++                                .withOption("hosts", "http://localhost:9200")
++                                .withOption("index", "test-index")
++                                .withOption("sink.bulk-flush.max-size", "10mb")
++                                .withOption("sink.max-record-size", "5mb")
++                                .build());
++
++        Sink<RowData> runtimeSink =
++                ((SinkV2Provider) dynamicSink.getSinkRuntimeProvider(new MockContext()))
++                        .createSink();
++
++        assertThat(runtimeSink)
++                .isInstanceOf(AsyncSinkBase.class)
++                .extracting("maxRecordSizeInBytes")
++                .isEqualTo(5L * 1024 * 1024);
++    }
++
++    @Test
++    void maxRecordSizeCannotExceedBulkFlushMaxSize() {
++        Elasticsearch8DynamicTableFactory factory = new Elasticsearch8DynamicTableFactory();
++
++        assertThatThrownBy(
++                        () ->
++                                factory.createDynamicTableSink(
++                                        context()
++                                                .withOption("connector", "elasticsearch-8")
++                                                .withOption("hosts", "http://localhost:9200")
++                                                .withOption("index", "test-index")
++                                                .withOption("sink.bulk-flush.max-size", "2mb")
++                                                .withOption("sink.max-record-size", "5mb")
++                                                .build()))
++                .isInstanceOf(org.apache.flink.table.api.ValidationException.class)
++                .hasMessage(
++                        "'sink.max-record-size' must not exceed "
++                                + "'sink.bulk-flush.max-size'. Got: 5242880 bytes and 2097152 bytes");
++    }
++
++    private static class MockContext implements DynamicTableSink.Context {
++        @Override
++        public boolean isBounded() {
++            return false;
++        }
++
++        @Override
++        public TypeInformation<?> createTypeInformation(DataType consumedDataType) {
++            return null;
++        }
++
++        @Override
++        public TypeInformation<?> createTypeInformation(LogicalType consumedLogicalType) {
++            return null;
++        }
++
++        @Override
++        public DynamicTableSink.DataStructureConverter createDataStructureConverter(
++                DataType consumedDataType) {
++            return null;
++        }
++
++        @Override
++        public Optional<int[][]> getTargetColumns() {
++            return Optional.empty();
++        }
++    }
++}

@@ -96,6 +96,12 @@ public class Elasticsearch8ConnectorOptions {
                     .defaultValue(MemorySize.parse("2mb"))
                     .withDescription("Maximum size of buffered actions per bulk request");
 
+    public static final ConfigOption<MemorySize> MAX_RECORD_SIZE_OPTION =
+            ConfigOptions.key("sink.max-record-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("1mb"))
+                    .withDescription("Maximum serialized size of a single record");
+
     public static final ConfigOption<Duration> BULK_FLUSH_INTERVAL_OPTION =
             ConfigOptions.key("sink.bulk-flush.interval")
                     .durationType()

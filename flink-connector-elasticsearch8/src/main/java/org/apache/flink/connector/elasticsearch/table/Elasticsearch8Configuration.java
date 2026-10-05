@@ -46,6 +46,7 @@ import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8Conne
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.HOSTS_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.INDEX_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.KEY_DELIMITER_OPTION;
+import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RECORD_SIZE_OPTION;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.MAX_RETRIES;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.NUM_CANDIDATES;
 import static org.apache.flink.connector.elasticsearch.table.Elasticsearch8ConnectorOptions.PASSWORD_OPTION;
@@ -78,6 +79,10 @@ public class Elasticsearch8Configuration {
 
     public MemorySize getBulkFlushMaxByteSize() {
         return config.get(BULK_FLUSH_MAX_SIZE_OPTION);
+    }
+
+    public MemorySize getMaxRecordSize() {
+        return config.get(MAX_RECORD_SIZE_OPTION);
     }
 
     public long getBulkFlushInterval() {
